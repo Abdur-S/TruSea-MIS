@@ -390,7 +390,65 @@ body {
 .spc-val.green { color: #16a34a; }
 .spc-val.red   { color: #dc2626; }
 
-/* ── HIGHLIGHTS PAGE ── */
+/* ── SALES REPORT PAGE ── */
+.sr-pdf-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(135deg,#1a1a2e,#0f3460);
+  border-radius: 16px; padding: 14px 16px; margin-bottom: 14px; color: #fff;
+}
+.sr-pdf-title  { font-size: 15px; font-weight: 800; color: #90e0ef; }
+.sr-pdf-sub    { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+.sr-pdf-btn {
+  background: #fff; color: #1a1a2e; border: none; border-radius: 10px;
+  padding: 8px 16px; font-size: 12px; font-weight: 800; cursor: pointer;
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  transition: opacity 0.2s;
+}
+.sr-pdf-btn:active { opacity: 0.8; }
+
+/* Report section card */
+.sr-section {
+  background: #fff; border-radius: 16px; border: 1px solid #ebebeb;
+  overflow: hidden; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+.sr-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid #f0f0f0; background: #fafafa;
+}
+.sr-section-title { font-size: 13px; font-weight: 800; color: #1a1a2e; }
+.sr-section-meta  { font-size: 11px; color: #888; }
+
+/* Table */
+.sr-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sr-table th {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: #888; padding: 8px 12px;
+  text-align: right; border-bottom: 2px solid #f0f0f0; background: #fafafa;
+}
+.sr-table th:first-child { text-align: left; }
+.sr-table td {
+  padding: 9px 12px; text-align: right;
+  border-bottom: 1px solid #f7f7f7; color: #1a1a2e; vertical-align: middle;
+}
+.sr-table td:first-child { text-align: left; font-weight: 600; }
+.sr-table tr:last-child td { border-bottom: none; }
+.sr-table .total-row td {
+  font-weight: 800; background: #f0f4ff;
+  border-top: 2px solid #1a1a2e; border-bottom: none;
+}
+.sr-week-badge {
+  display: inline-block; background: #f0f0f0; border-radius: 6px;
+  padding: 1px 7px; font-size: 10px; font-weight: 700; color: #555;
+}
+.sr-cust-fish { font-size: 10px; color: #888; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+
+/* @print for PDF */
+@media print {
+  .main-tabs, .header, .date-banner, .tab-row, #srMonthChips,
+  .sync-btn, .sr-pdf-bar { display: none !important; }
+  .page-section { display: block !important; }
+  .sr-section { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
+}
 .hl-header {
   background: linear-gradient(135deg,#1a1a2e 0%,#0f3460 100%);
   border-radius: 20px;
@@ -662,6 +720,7 @@ body {
 <div class="main-tab-row">
   <button class="main-tab-btn active" onclick="showPage('overview',this)">📊 Overview</button>
   <button class="main-tab-btn" onclick="showPage('highlights',this)">✨ Highlights</button>
+  <button class="main-tab-btn" onclick="showPage('salesreport',this)">📋 Sales Report</button>
   <button class="main-tab-btn" onclick="showPage('fish',this)">🐟 Fish Report</button>
   <button class="main-tab-btn" onclick="showPage('customers',this)">👥 Customers</button>
   <button class="main-tab-btn" id="archiveTabBtn" onclick="showPage('april',this)">📅 Month Wise Sale Report</button>
@@ -887,6 +946,9 @@ function showPage(page, el) {
   // Re-trigger highlights on tab switch if data is ready
   if (page === 'highlights' && _allOrders.length) {
     buildHighlightsMonthChips(_allOrders);
+  }
+  if (page === 'salesreport' && _allOrders.length) {
+    buildSalesReportMonthChips(_allOrders);
   }
 }
 
@@ -1143,6 +1205,299 @@ function renderCustomerReport(allOrders) {
 }
 
 // ── RENDER MONTHLY ARCHIVE (dynamic — always previous month) ─────
+
+// ══════════════════════════════════════════════════
+// SALES REPORT PAGE
+// ══════════════════════════════════════════════════
+
+let _srMonths = [];
+
+function buildSalesReportMonthChips(allOrders) {
+  const monthMap = {};
+  allOrders.forEach(o => {
+    const d = getOrderDate(o); if (!d) return;
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    if (!monthMap[key]) monthMap[key] = {
+      key, year: d.getFullYear(), month: d.getMonth(),
+      label: d.toLocaleDateString('en-IN', {month:'long', year:'numeric'}),
+      shortLabel: d.toLocaleDateString('en-IN', {month:'short', year:'numeric'}),
+      orders: []
+    };
+    monthMap[key].orders.push(o);
+  });
+  _srMonths = Object.values(monthMap).sort((a,b) => b.key.localeCompare(a.key));
+
+  const el = document.getElementById('srMonthChips');
+  if (!el) return;
+  el.innerHTML = _srMonths.map((m,i) =>
+    `<button class="mchip ${i===0?'active':''}" id="srchip_${i}" onclick="showSalesReport(${i})"
+      style="white-space:nowrap;flex-shrink:0">${m.shortLabel}</button>`
+  ).join('');
+  if (_srMonths.length) showSalesReport(0);
+}
+
+function showSalesReport(idx) {
+  document.querySelectorAll('[id^="srchip_"]').forEach((el,i) => el.classList.toggle('active', i===idx));
+  const m = _srMonths[idx];
+  if (m) renderSalesReport(m);
+}
+
+function renderSalesReport(m) {
+  const el = document.getElementById('srContent');
+  if (!el) return;
+
+  const orders  = m.orders;
+  const revenue = sumTotal(orders);
+
+  // ── 1. Weekly breakdown ──────────────────────────
+  // Group orders by week number within this month
+  const weekMap = {};
+  orders.forEach(o => {
+    const d = getOrderDate(o); if (!d) return;
+    // Week within month: day 1-7=W1, 8-14=W2, 15-21=W3, 22+=W4
+    const weekNum = Math.ceil(d.getDate() / 7);
+    const wKey    = `W${weekNum}`;
+    if (!weekMap[wKey]) weekMap[wKey] = { label: `Week ${weekNum}`, orders: [], fish: [] };
+    weekMap[wKey].orders.push(o);
+  });
+
+  // For each week, also compute fish qty
+  Object.values(weekMap).forEach(w => {
+    const fishMap = {};
+    w.orders.forEach(o => {
+      if (!o.productReport) return;
+      parseProductReport(o.productReport).forEach(item => {
+        if (!fishMap[item.key]) fishMap[item.key] = 0;
+        fishMap[item.key] += item.qty;
+      });
+    });
+    w.fishTotal = Object.values(fishMap).reduce((a,b)=>a+b, 0);
+    w.revenue   = sumTotal(w.orders);
+  });
+
+  const weekRows = Object.entries(weekMap)
+    .sort((a,b) => a[0].localeCompare(b[0]))
+    .map(([wKey, w]) => `
+      <tr>
+        <td><span class="sr-week-badge">${wKey}</span> ${w.label}</td>
+        <td>${w.orders.length}</td>
+        <td>${w.fishTotal}</td>
+        <td>${fmtMoney(w.revenue)}</td>
+        <td>${w.orders.length ? fmtMoney(Math.round(w.revenue/w.orders.length)) : '—'}</td>
+      </tr>`).join('');
+
+  const weekTotal = Object.values(weekMap).reduce((a,w)=>a+w.fishTotal,0);
+
+  // ── 2. Item-wise (fish) breakdown ───────────────
+  const fishList = buildFishReport(orders);
+  const fishRows = fishList.length === 0
+    ? '<tr><td colspan="4" style="text-align:center;color:#aaa;padding:16px">No product report data — run generateAll() in Apps Script</td></tr>'
+    : fishList.map(f => `
+        <tr>
+          <td>${f.key}</td>
+          <td style="text-align:center">${f.totalQty}</td>
+          <td style="text-align:center">${f.totalKg > 0 ? f.totalKg.toFixed(2)+'kg' : '—'}</td>
+          <td>${Math.round((f.totalQty / (fishList.reduce((a,x)=>a+x.totalQty,0)||1)) * 100)}%</td>
+        </tr>`).join('');
+  const totalFishQty = fishList.reduce((a,f)=>a+f.totalQty,0);
+  const totalFishKg  = fishList.reduce((a,f)=>a+f.totalKg,0);
+
+  // ── 3. Customer list ────────────────────────────
+  const custMap = {};
+  orders.forEach(o => {
+    const key = (o.phone || o.name || '').trim();
+    if (!key) return;
+    if (!custMap[key]) custMap[key] = { name: o.name, phone: o.phone, orders: [], fishSet: new Set() };
+    custMap[key].orders.push(o);
+    if (o.productReport) {
+      parseProductReport(o.productReport).forEach(item => custMap[key].fishSet.add(item.name));
+    }
+  });
+  const custList = Object.values(custMap)
+    .map(c => ({
+      name: c.name, phone: c.phone,
+      orderCount: c.orders.length,
+      totalSpend: sumTotal(c.orders),
+      fish: [...c.fishSet].slice(0,3).join(', '),
+    }))
+    .sort((a,b) => b.totalSpend - a.totalSpend);
+
+  const custRows = custList.length === 0
+    ? '<tr><td colspan="5" style="text-align:center;color:#aaa;padding:16px">No customers found</td></tr>'
+    : custList.map((c,i) => `
+        <tr>
+          <td>${i+1}. ${c.name}</td>
+          <td>${c.phone || '—'}</td>
+          <td style="text-align:center">${c.orderCount}</td>
+          <td><div class="sr-cust-fish">${c.fish || '—'}</div></td>
+          <td>${fmtMoney(c.totalSpend)}</td>
+        </tr>`).join('');
+
+  el.innerHTML = `
+    <!-- PDF download bar -->
+    <div class="sr-pdf-bar">
+      <div>
+        <div class="sr-pdf-title">📋 ${m.label} — Sales Report</div>
+        <div class="sr-pdf-sub">${orders.length} orders · ${fmtMoney(revenue)} revenue · ${custList.length} customers</div>
+      </div>
+      <button class="sr-pdf-btn" onclick="downloadSalesReportPDF('${m.shortLabel}')">
+        ⬇️ Download PDF
+      </button>
+    </div>
+
+    <!-- 1. Monthly Sales Summary -->
+    <div class="sr-section" id="sr_monthly">
+      <div class="sr-section-head">
+        <div class="sr-section-title">📅 1. Monthly Sales & Volume</div>
+        <div class="sr-section-meta">${m.label}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#f0f0f0">
+        ${[
+          ['Orders',    orders.length,                                              ''],
+          ['Revenue',   fmtMoney(revenue),                                          ''],
+          ['Fish Qty',  totalFishQty + ' qty',                                      ''],
+          ['Avg/Order', orders.length ? fmtMoney(Math.round(revenue/orders.length)) : '—', ''],
+        ].map(([l,v]) => `
+          <div style="background:#fff;padding:12px 8px;text-align:center">
+            <div style="font-size:18px;font-weight:900;color:#1a1a2e">${v}</div>
+            <div style="font-size:9px;color:#888;font-weight:700;text-transform:uppercase;margin-top:3px">${l}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- 2. Weekly Sales -->
+    <div class="sr-section" id="sr_weekly">
+      <div class="sr-section-head">
+        <div class="sr-section-title">📆 2. Weekly Sales & Volume</div>
+        <div class="sr-section-meta">${m.label}</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="sr-table">
+          <thead>
+            <tr>
+              <th>Week</th>
+              <th>Orders</th>
+              <th>Fish Qty</th>
+              <th>Revenue</th>
+              <th>Avg/Order</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${weekRows}
+            <tr class="total-row">
+              <td>Total</td>
+              <td>${orders.length}</td>
+              <td>${weekTotal}</td>
+              <td>${fmtMoney(revenue)}</td>
+              <td>${orders.length ? fmtMoney(Math.round(revenue/orders.length)) : '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3. Item-wise -->
+    <div class="sr-section" id="sr_itemwise">
+      <div class="sr-section-head">
+        <div class="sr-section-title">🐟 3. Item-wise Sales & Volume</div>
+        <div class="sr-section-meta">${fishList.length} variants sold</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="sr-table">
+          <thead>
+            <tr>
+              <th>Fish / Variant</th>
+              <th>Qty Sold</th>
+              <th>Weight</th>
+              <th>% of Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${fishRows}
+            <tr class="total-row">
+              <td>Total</td>
+              <td style="text-align:center">${totalFishQty} qty</td>
+              <td style="text-align:center">${totalFishKg.toFixed(2)}kg</td>
+              <td>100%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 4. Customer list -->
+    <div class="sr-section" id="sr_customers">
+      <div class="sr-section-head">
+        <div class="sr-section-title">👥 4. Customer List — Sales & Volume</div>
+        <div class="sr-section-meta">${custList.length} customers</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="sr-table">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Phone</th>
+              <th>Orders</th>
+              <th>Fish Ordered</th>
+              <th>Total Spend</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${custRows}
+            <tr class="total-row">
+              <td>${custList.length} customers</td>
+              <td></td>
+              <td>${orders.length}</td>
+              <td></td>
+              <td>${fmtMoney(revenue)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function downloadSalesReportPDF(monthLabel) {
+  const content = document.getElementById('srContent');
+  if (!content) return;
+
+  // Use browser print dialog with print CSS
+  const printWin = window.open('', '_blank');
+  printWin.document.write(`<!DOCTYPE html><html><head>
+    <title>TruSea Sales Report — ${monthLabel}</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; font-size: 12px; color: #1a1a2e; padding: 20px; }
+      h1 { font-size: 18px; font-weight: 800; color: #1a1a2e; margin-bottom: 4px; }
+      .sub { font-size: 11px; color: #888; margin-bottom: 20px; }
+      .sr-section { border: 1px solid #ddd; border-radius: 10px; overflow: hidden; margin-bottom: 16px; page-break-inside: avoid; }
+      .sr-section-head { display:flex; justify-content:space-between; padding: 10px 14px; background: #f5f5f5; border-bottom: 1px solid #ddd; }
+      .sr-section-title { font-size: 13px; font-weight: 800; }
+      .sr-section-meta  { font-size: 11px; color: #888; }
+      .grid4 { display: grid; grid-template-columns: repeat(4,1fr); }
+      .grid4-cell { padding: 12px 8px; text-align: center; border-right: 1px solid #eee; }
+      .grid4-cell:last-child { border-right: none; }
+      .grid4-val { font-size: 17px; font-weight: 900; }
+      .grid4-lbl { font-size: 9px; color: #888; text-transform: uppercase; font-weight: 700; margin-top: 3px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #888; padding: 7px 10px; text-align: right; background: #fafafa; border-bottom: 2px solid #eee; }
+      th:first-child { text-align: left; }
+      td { padding: 8px 10px; text-align: right; border-bottom: 1px solid #f0f0f0; font-size: 11px; }
+      td:first-child { text-align: left; font-weight: 600; }
+      .total-row td { font-weight: 800; background: #f0f4ff; border-top: 2px solid #1a1a2e; }
+      .week-badge { background: #f0f0f0; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; }
+      .cust-fish { font-size: 10px; color: #888; }
+      @page { margin: 15mm; }
+    </style>
+  </head><body>
+    <h1>🐟 TruSea Fish — Sales Report</h1>
+    <div class="sub">Month: ${monthLabel} · Generated: ${new Date().toLocaleString('en-IN')}</div>
+    ${content.innerHTML}
+  </body></html>`);
+  printWin.document.close();
+  setTimeout(() => { printWin.print(); printWin.close(); }, 500);
+}
 
 // ══════════════════════════════════════════════════
 // HIGHLIGHTS PAGE
@@ -2062,6 +2417,20 @@ function renderMIS(allOrders, allCamps) {
   </div><!-- /page_customers -->
 
   <!-- ══════════════════════════════════════ -->
+  <!--  PAGE: SALES REPORT                    -->
+  <!-- ══════════════════════════════════════ -->
+  <div class="page-section" id="page_salesreport">
+    <div style="padding:14px 14px 0">
+      <!-- Month selector -->
+      <div id="srMonthChips" style="display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:10px;flex-wrap:nowrap"></div>
+      <!-- Report content — rendered here, then PDF'd -->
+      <div id="srContent">
+        <div class="loading"><div class="spinner"></div>Loading…</div>
+      </div>
+    </div>
+  </div><!-- /page_salesreport -->
+
+  <!-- ══════════════════════════════════════ -->
   <!--  PAGE: HIGHLIGHTS                      -->
   <!-- ══════════════════════════════════════ -->
   <div class="page-section" id="page_highlights">
@@ -2857,6 +3226,7 @@ async function init() {
     renderMIS(orders, camps);
     setArchiveTabName();
     buildHighlightsMonthChips(orders);
+    buildSalesReportMonthChips(orders);
     buildMonthFishChips(orders);
     buildDayFishChips(orders);
     buildCustomerDateWise(orders);
