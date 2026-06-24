@@ -449,6 +449,51 @@ body {
   .page-section { display: block !important; }
   .sr-section { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; }
 }
+/* ── HIGHLIGHTS NEW DESIGN ── */
+.hl-new-section {
+  background: #fff; border-radius: 18px; border: 1px solid #ebebeb;
+  overflow: hidden; margin-bottom: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+}
+.hl-new-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 14px 16px 12px; border-bottom: 1px solid #f0f0f0; background: #fafafa;
+  gap: 10px;
+}
+.hl-new-title { font-size: 14px; font-weight: 800; color: #1a1a2e; }
+.hl-new-sub   { font-size: 11px; color: #888; margin-top: 3px; }
+.hl-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.hl-table th {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+  color: #888; padding: 8px 12px; text-align: right;
+  border-bottom: 2px solid #f0f0f0; background: #fafafa; white-space: nowrap;
+}
+.hl-table th:first-child { text-align: left; }
+.hl-table td {
+  padding: 9px 12px; text-align: right;
+  border-bottom: 1px solid #f7f7f7; color: #1a1a2e; vertical-align: middle;
+}
+.hl-table td:first-child { text-align: left; font-weight: 600; }
+.hl-table tr:last-child td { border-bottom: none; }
+.hl-total-row td { font-weight: 800 !important; background: #f0f4ff; border-top: 2px solid #1a1a2e !important; }
+.hl-toggle-btn {
+  background: #f0f0f0; border: none; border-radius: 20px;
+  padding: 5px 12px; font-size: 11px; font-weight: 700; color: #666;
+  cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0;
+}
+.hl-toggle-btn.active { background: #1a1a2e; color: #fff; }
+.hl-tooltip {
+  background: #1a1a2e; color: #fff; border-radius: 10px;
+  padding: 10px 14px; font-size: 12px; margin-top: 10px;
+  display: inline-block; min-width: 160px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  animation: tooltipFade 0.18s ease;
+}
+@keyframes tooltipFade {
+  from { opacity:0; transform:translateY(4px); }
+  to   { opacity:1; transform:none; }
+}
+
+/* ── HIGHLIGHTS OLD (kept for compatibility) ── */
 .hl-header {
   background: linear-gradient(135deg,#1a1a2e 0%,#0f3460 100%);
   border-radius: 20px;
@@ -803,11 +848,12 @@ function parseOrders(table) {
   const iTs      = fi('Timestamp');
   const iName    = fi('Name');
   const iPhone   = fi('Phone');
+  const iProduct = fi('Product');            // Col G — raw product string
+  const iPrice   = fi('Price');              // Col J — price breakdown
   const iTotal   = fi('Order Total');
-  const iReport  = fi('Product Report');   // Col L
-  const iBooked  = fi('Booked Date');      // Col M
-  const iDeliv   = fi('Delivered Date');   // Col N ← main date for archive
-  const iFishSold= fi('Fish Sold');        // Col O ← fish sold details
+  const iReport  = fi('Product Report');     // Col L
+  const iBooked  = fi('Booked Date');        // Col M
+  const iDeliv   = fi('Delivered Date');     // Col N
 
   const v  = (r,i)=>(i>=0&&r.c[i]&&r.c[i].v!=null)?String(r.c[i].v).trim():'';
   const fv = (r,i)=>(i>=0&&r.c[i])?(r.c[i].f||v(r,i)):'';
@@ -829,12 +875,13 @@ function parseOrders(table) {
   return (table.rows||[]).map(r=>({
     name:          v(r,iName),
     phone:         v(r,iPhone),
-    ts:            parseTs(r,iTs),       // Timestamp — for overview/MTD/YTD
-    bookedDate:    parseTs(r,iBooked),   // Col M
-    deliveredDate: parseTs(r,iDeliv),    // Col N — used for archive reports
-    fishSold:      v(r,iFishSold),       // Col O — fish sold string
+    ts:            parseTs(r,iTs),
+    bookedDate:    parseTs(r,iBooked),
+    deliveredDate: parseTs(r,iDeliv),
     total:         parseTotal(fv(r,iTotal)||v(r,iTotal)),
-    productReport: v(r,iReport),
+    productReport: v(r,iReport),           // Col L — clean fish report
+    productRaw:    v(r,iProduct),          // Col G — raw product names
+    priceRaw:      v(r,iPrice),            // Col J — price breakdown
   })).filter(o=>o.name&&o.name.length>1&&o.ts);
 }
 
@@ -869,13 +916,63 @@ function buildFishReport(orders) {
         : item.size.endsWith('g')
           ? (parseFloat(item.size)/1000)*item.qty : 0;
       map[item.key].totalKg += kg;
-      // Apportion order total by qty share
       if (totalItemQty > 0 && o.total > 0) {
         map[item.key].totalValue += o.total * item.qty / totalItemQty;
       }
     });
   });
   return Object.values(map).sort((a,b)=>b.totalQty-a.totalQty);
+}
+
+// ── Parse Col G + Col J → exact fish-wise revenue ────
+// Col G: "Vanjaram – Small - 1kg ×2 | Baracuda – Medium - 500g"
+// Col J: "₹1380×2 | ₹549×1"
+// Returns: [{key, qty, unitPrice, totalPrice}, ...]
+function parseFishWithPrice(productRaw, priceRaw) {
+  if (!productRaw) return [];
+  const fishSegs  = productRaw.split('|').map(s => s.trim()).filter(Boolean);
+  const priceSegs = (priceRaw || '').split('|').map(s => s.trim());
+
+  return fishSegs.map((seg, i) => {
+    const qtyMatch = seg.match(/[×x](\d+)\s*$/i);
+    const qty      = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+    const key      = seg.replace(/\s*[×x]\d+\s*$/i, '').trim();
+
+    const pseg      = priceSegs[i] || '';
+    const baseMatch = pseg.match(/₹?([\d,]+)[×x](\d+)/i);
+    let unitPrice = 0, totalPrice = 0;
+
+    if (baseMatch) {
+      unitPrice  = parseFloat(baseMatch[1].replace(/,/g,''));
+      const pQty = parseInt(baseMatch[2]);
+      totalPrice = unitPrice * pQty;
+      // Addons: +₹199
+      const addonMatches = [...pseg.matchAll(/\+₹?([\d,]+)/g)];
+      addonMatches.forEach(m => { totalPrice += parseFloat(m[1].replace(/,/g,'')); });
+    } else {
+      const numMatch = pseg.match(/([\d,]+)/);
+      if (numMatch) {
+        unitPrice  = parseFloat(numMatch[1].replace(/,/g,''));
+        totalPrice = unitPrice * qty;
+      }
+    }
+    return { key, qty, unitPrice, totalPrice };
+  });
+}
+
+// Build fish revenue map from orders using EXACT Col G + Col J prices
+function buildFishRevenueReport(orders) {
+  const map = {};
+  orders.forEach(o => {
+    const items = parseFishWithPrice(o.productRaw || o.productReport, o.priceRaw);
+    items.forEach(item => {
+      if (!item.key) return;
+      if (!map[item.key]) map[item.key] = { key: item.key, totalQty: 0, totalRevenue: 0 };
+      map[item.key].totalQty     += item.qty;
+      map[item.key].totalRevenue += item.totalPrice;
+    });
+  });
+  return Object.values(map).sort((a,b) => b.totalRevenue - a.totalRevenue);
 }
 
 // ── PARSE CAMPAIGNS (Sheet3) ────────────────────────
@@ -1544,264 +1641,756 @@ function renderHighlights(m) {
   const el = document.getElementById('hlContent');
   if (!el) return;
 
-  const orders    = m.orders;
-  const revenue   = sumTotal(orders);
-  const fishList  = buildFishReport(orders);
+  // ── All months data for graphs ──────────────────
+  const allMonths = _hlMonths.slice().reverse(); // chronological order
 
-  // Unique customers
-  const custMap = {};
-  orders.forEach(o => {
-    const key = (o.phone || o.name || '').trim();
-    if (!key) return;
-    if (!custMap[key]) custMap[key] = { name: o.name, phone: o.phone, orders: [], fish: new Set() };
-    custMap[key].orders.push(o);
-    if (o.productReport) {
-      o.productReport.split('|').map(s => s.replace(/×\d+$/, '').trim()).filter(Boolean)
-        .forEach(f => custMap[key].fish.add(f));
-    }
+  // ── Current month orders ────────────────────────
+  const orders  = m.orders;
+  const revenue = sumTotal(orders);
+
+  // ── Section 1: Month-wise overview table ────────
+  const monthTableRows = allMonths.map(mo => {
+    const rev  = sumTotal(mo.orders);
+    const fish = buildFishReport(mo.orders);
+    const kgTotal = fish.reduce((a,f)=>a+f.totalKg,0);
+    const qtyTotal = fish.reduce((a,f)=>a+f.totalQty,0);
+    const custMap2 = {};
+    mo.orders.forEach(o => {
+      const k=(o.phone||o.name||'').trim();
+      if(k) custMap2[k]=(custMap2[k]||0)+1;
+    });
+    const custCount = Object.keys(custMap2).length;
+    const isCurrent = mo.key === m.key;
+    return `<tr ${isCurrent ? 'style="background:#f0f4ff;font-weight:800"' : ''}>
+      <td>${mo.shortLabel}${isCurrent ? ' ◀' : ''}</td>
+      <td>${mo.orders.length}</td>
+      <td>${fmtMoney(rev)}</td>
+      <td>${qtyTotal}</td>
+      <td>${kgTotal.toFixed(2)} kg</td>
+      <td>${custCount}</td>
+    </tr>`;
+  }).join('');
+
+  // Total row
+  const grandOrders = allMonths.reduce((a,mo)=>a+mo.orders.length,0);
+  const grandRev    = allMonths.reduce((a,mo)=>a+sumTotal(mo.orders),0);
+  const grandFish   = buildFishReport(allMonths.flatMap(mo=>mo.orders));
+  const grandQty    = grandFish.reduce((a,f)=>a+f.totalQty,0);
+  const grandKg     = grandFish.reduce((a,f)=>a+f.totalKg,0);
+
+  // ── Section 2: Fish matrix (fish × month) ───────
+  const allFishKeys = [...new Set(
+    allMonths.flatMap(mo => buildFishReport(mo.orders).map(f=>f.key))
+  )];
+
+  const fishMatrixRows = allFishKeys.map(key => {
+    const cells = allMonths.map(mo => {
+      const fish = buildFishReport(mo.orders);
+      const f    = fish.find(x=>x.key===key);
+      if (!f || f.totalQty===0) return `<td style="color:#ccc;text-align:center">—</td>`;
+      return `<td style="text-align:center">
+        <div style="font-size:12px;font-weight:800;color:#1a1a2e">${f.totalQty}</div>
+        <div style="font-size:9px;color:#888">${f.totalKg>0?f.totalKg.toFixed(1)+'kg':''}</div>
+      </td>`;
+    }).join('');
+    const totalF = allFishKeys; // reuse for totals
+    const allQty  = allMonths.reduce((a,mo)=>{ const f=buildFishReport(mo.orders).find(x=>x.key===key); return a+(f?f.totalQty:0); },0);
+    const allKg   = allMonths.reduce((a,mo)=>{ const f=buildFishReport(mo.orders).find(x=>x.key===key); return a+(f?f.totalKg:0); },0);
+    return `<tr>
+      <td style="white-space:nowrap;font-weight:600;font-size:11px;min-width:140px">${key}</td>
+      ${cells}
+      <td style="text-align:center;font-weight:800;background:#f7f9ff">
+        <div style="font-size:12px;color:#1a1a2e">${allQty}</div>
+        <div style="font-size:9px;color:#888">${allKg.toFixed(1)}kg</div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  // ── Section 3: Monthly + Weekly line graph data ──
+  // Monthly: revenue per month
+  const monthLabels  = allMonths.map(mo=>mo.shortLabel);
+  const monthRevData = allMonths.map(mo=>sumTotal(mo.orders));
+  const monthOrdData = allMonths.map(mo=>mo.orders.length);
+
+  // Weekly across ALL time: group all orders by week
+  const weekMap = {};
+  _allOrders.forEach(o => {
+    const d = getOrderDate(o); if(!d) return;
+    const yr = d.getFullYear();
+    const wn = getWeekNum(d);
+    const key = `${yr}-W${String(wn).padStart(2,'0')}`;
+    if(!weekMap[key]) weekMap[key]={label:`W${wn}/${String(yr).slice(2)}`, orders:[]};
+    weekMap[key].orders.push(o);
   });
-  const custList = Object.values(custMap)
-    .map(c => ({ ...c, totalSpend: sumTotal(c.orders), orderCount: c.orders.length }))
-    .sort((a,b) => b.totalSpend - a.totalSpend);
+  const weeks     = Object.entries(weekMap).sort((a,b)=>a[0].localeCompare(b[0])).slice(-16);
+  const weekLabels = weeks.map(([,w])=>w.label);
+  const weekRevData= weeks.map(([,w])=>sumTotal(w.orders));
+  const weekOrdData= weeks.map(([,w])=>w.orders.length);
 
-  // Avatar colors
-  const avatarColors = ['#1a1a2e','#0f3460','#16a34a','#b45309','#7c3aed'];
-
-  // Top 5 fish
-  const top5Fish = fishList.slice(0, 5);
-  const maxQty   = top5Fish[0]?.totalQty || 1;
-
-  const fishHtml = top5Fish.length === 0
-    ? '<div class="empty-row">No fish data — run generateAll() in Apps Script</div>'
-    : top5Fish.map((f, i) => {
-        const rankClass = `rank-${i+1}`;
-        const pct = Math.round((f.totalQty / maxQty) * 100);
-        // Estimate revenue: totalKg * avg price (rough from order totals)
-        return `
-          <div class="fish-rank-row">
-            <div class="fish-rank-num ${rankClass}">${i+1}</div>
-            <div class="fish-rank-info">
-              <div class="fish-rank-name">${f.key}</div>
-              <div class="fish-rank-meta">${f.totalKg > 0 ? f.totalKg.toFixed(2)+'kg sold' : ''}</div>
-            </div>
-            <div class="fish-rank-right">
-              <div class="fish-rank-qty">${f.totalQty} qty</div>
-            </div>
-          </div>
-          <div class="fish-bar-wrap">
-            <div class="fish-bar-bg"><div class="fish-bar-fg" style="width:${pct}%"></div></div>
-          </div>`;
-      }).join('');
-
-  // Top 5 customers
-  const top5Cust = custList.slice(0, 5);
-  const custHtml = top5Cust.length === 0
-    ? '<div class="empty-row">No customer data</div>'
-    : top5Cust.map((c, i) => {
-        const initials = (c.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-        const fishTags = [...c.fish].slice(0, 4)
-          .map(f => `<span class="cust-fish-tag">${f.split('–')[0].trim()}</span>`).join('');
-        return `
-          <div class="cust-rank-row">
-            <div class="cust-rank-top">
-              <div class="cust-rank-avatar" style="background:${avatarColors[i%5]}">${initials}</div>
-              <div style="flex:1;min-width:0">
-                <div class="cust-rank-name">${c.name}</div>
-                <div class="cust-rank-phone">${c.phone || ''} · ${c.orderCount} order${c.orderCount>1?'s':''}</div>
-              </div>
-              <div class="cust-rank-spend">${fmtMoney(c.totalSpend)}</div>
-            </div>
-            ${fishTags ? `<div class="cust-fish-tags">${fishTags}</div>` : ''}
-          </div>`;
-      }).join('');
-
-  // Build summary stats
-  const uniqueCustCount = custList.length;
-  const totalQty = fishList.reduce((a,f) => a+f.totalQty, 0);
+  // ── Section 4: Customer day-wise per month ───────
+  // We'll build this dynamically in JS after render
 
   el.innerHTML = `
-    <!-- Header strip -->
-    <div class="hl-header">
-      <div class="hl-header-label">✨ Monthly Highlights</div>
-      <div class="hl-header-month">${m.label}</div>
-      <div class="hl-stat-row">
-        <div class="hl-stat">
-          <div class="hl-stat-val">${orders.length}</div>
-          <div class="hl-stat-lbl">Orders</div>
+    <!-- ═══ SECTION 1: Month-wise overview ═══ -->
+    <div class="hl-new-section" id="monthOverviewSection">
+      <div class="hl-new-head">
+        <div>
+          <div class="hl-new-title">📊 Month-wise Overview</div>
+          <div class="hl-new-sub">All months · orders, revenue, fish quantity, customers</div>
         </div>
-        <div class="hl-stat">
-          <div class="hl-stat-val">${totalQty}</div>
-          <div class="hl-stat-lbl">Fish Qty</div>
-        </div>
-        <div class="hl-stat">
-          <div class="hl-stat-val">${uniqueCustCount}</div>
-          <div class="hl-stat-lbl">Customers</div>
-        </div>
+        <button onclick="downloadSectionPDF('monthOverviewSection','Month-wise Overview')"
+          style="background:#f0f0f0;color:#555;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">⬇️ PDF</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="hl-table">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th>Orders</th>
+              <th>Revenue</th>
+              <th>Fish Qty</th>
+              <th>Fish Kg</th>
+              <th>Customers</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${monthTableRows}
+            <tr class="hl-total-row">
+              <td>Total</td>
+              <td>${grandOrders}</td>
+              <td>${fmtMoney(grandRev)}</td>
+              <td>${grandQty}</td>
+              <td>${grandKg.toFixed(2)} kg</td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
-    <!-- Full Sale summary -->
-    <div class="hl-card">
-      <div class="hl-card-head">
-        <div class="hl-card-title">📊 Full Sale Overview</div>
-        <div class="hl-card-icon">📊</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#f0f0f0">
-        <div style="background:#fff;padding:14px 12px;text-align:center">
-          <div style="font-size:22px;font-weight:900;color:#1a1a2e">${fmtMoney(revenue)}</div>
-          <div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;margin-top:3px">Total Revenue</div>
+    <!-- ═══ SECTION 2: Fish × Month matrix ═══ -->
+    <div class="hl-new-section" id="fishMatrixSection">
+      <div class="hl-new-head">
+        <div>
+          <div class="hl-new-title">🐟 Fish Sales — Month wise Matrix</div>
+          <div class="hl-new-sub">Qty sold + Revenue per fish per month</div>
         </div>
-        <div style="background:#fff;padding:14px 12px;text-align:center">
-          <div style="font-size:22px;font-weight:900;color:#1a1a2e">${orders.length > 0 ? fmtMoney(Math.round(revenue/orders.length)) : '—'}</div>
-          <div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;margin-top:3px">Avg / Order</div>
-        </div>
-        <div style="background:#fff;padding:14px 12px;text-align:center">
-          <div style="font-size:22px;font-weight:900;color:#1a1a2e">${uniqueCustCount}</div>
-          <div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;margin-top:3px">Unique Customers</div>
-        </div>
-        <div style="background:#fff;padding:14px 12px;text-align:center">
-          <div style="font-size:22px;font-weight:900;color:#1a1a2e">${fishList.length}</div>
-          <div style="font-size:10px;color:#888;font-weight:700;text-transform:uppercase;margin-top:3px">Fish Variants</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Top 5 Fish -->
-    <div class="hl-card">
-      <div class="hl-card-head">
-        <div class="hl-card-title">🐟 Top 5 Fish Sold</div>
-        <div class="hl-card-icon">🏆</div>
-      </div>
-      ${fishHtml}
-    </div>
-
-    <!-- Top 5 Customers -->
-    <div class="hl-card">
-      <div class="hl-card-head">
-        <div class="hl-card-title">👥 Top 5 Customers</div>
-        <div class="hl-card-icon">⭐</div>
-      </div>
-      ${custHtml}
-    </div>
-
-    <!-- AI Analysis -->
-    <div class="hl-card" id="hlAiCard">
-      <div class="hl-card-head">
-        <div class="hl-card-title">🤖 AI Analysis</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:9px;background:#e8f4fd;color:#0077b6;padding:2px 7px;border-radius:10px;font-weight:700">Powered by Claude</span>
-          <button onclick="runAiAnalysis()" id="hlAiGenerateBtn"
-            style="background:#1a1a2e;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer">
-            ✨ Generate
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select id="fishMatrixFilter" onchange="applyFishMatrixFilter()"
+            style="font-size:11px;font-weight:700;border:1.5px solid #e0e0e0;border-radius:8px;padding:5px 8px;background:#fff;color:#1a1a2e;cursor:pointer">
+            <option value="revenue">Sort: High Revenue</option>
+            <option value="qty_high">Sort: High Qty</option>
+            <option value="qty_low">Sort: Low Qty</option>
+          </select>
+          <button onclick="toggleFishMatrix()"
+            id="fishMatrixToggle"
+            style="background:#1a1a2e;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">
+            ▲ Collapse
+          </button>
+          <button onclick="downloadSectionPDF('fishMatrixSection','Fish Sales Matrix')"
+            style="background:#f0f0f0;color:#555;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer">
+            ⬇️ PDF
           </button>
         </div>
       </div>
-      <div id="hlAiContent" class="ai-analysis-box">
-        <div style="text-align:center;padding:20px;color:#aaa;font-size:13px">
-          Click <strong>✨ Generate</strong> to get AI insights for ${m.shortLabel}
+      <div id="fishMatrixBody" style="overflow-x:auto">
+        <table class="hl-table" id="fishMatrixTable">
+          <thead>
+            <tr>
+              <th style="text-align:left;min-width:160px;position:sticky;left:0;background:#fafafa;z-index:1">Fish / Variant</th>
+              ${allMonths.map(mo=>`<th style="text-align:center;min-width:110px">${mo.shortLabel}</th>`).join('')}
+              <th style="text-align:center;background:#f0f4ff;min-width:110px">Total</th>
+            </tr>
+          </thead>
+          <tbody id="fishMatrixTbody">
+            ${buildFishMatrixRows(allMonths, 'revenue')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ SECTION 3: Line Graph — Monthly & Weekly ═══ -->
+    <div class="hl-new-section" id="trendGraphSection">
+      <div class="hl-new-head">
+        <div>
+          <div class="hl-new-title">📈 Revenue Trend — Monthly & Weekly</div>
+          <div class="hl-new-sub">Green = monthly · Red = weekly · Click any point to see full details</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="hl-toggle-btn active" id="trendRevBtn" onclick="switchTrendMetric('rev')">Revenue</button>
+          <button class="hl-toggle-btn" id="trendOrdBtn" onclick="switchTrendMetric('ord')">Orders</button>
+          <button onclick="downloadSectionPDF('trendGraphSection','Revenue Trend')"
+            style="background:#f0f0f0;color:#555;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer">⬇️ PDF</button>
+        </div>
+      </div>
+
+      <!-- Monthly graph -->
+      <div style="padding:12px 14px 0">
+        <div style="font-size:11px;font-weight:700;color:#16a34a;margin-bottom:6px">● Monthly Trend</div>
+        <canvas id="hlMonthGraph" height="180" style="width:100%;display:block;cursor:pointer"></canvas>
+        <div id="hlMonthTooltip" class="hl-tooltip" style="display:none"></div>
+        <!-- Monthly click detail panel -->
+        <div id="hlMonthDetail" style="display:none;margin-top:12px;background:#f7f9ff;border-radius:12px;border:1px solid #e0e8ff;overflow:hidden">
+          <div style="background:#1a1a2e;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span id="hlMonthDetailTitle" style="font-size:13px;font-weight:800;color:#90e0ef"></span>
+            <button onclick="document.getElementById('hlMonthDetail').style.display='none'"
+              style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:16px;cursor:pointer">✕</button>
+          </div>
+          <div id="hlMonthDetailBody" style="padding:12px 14px"></div>
+        </div>
+      </div>
+
+      <!-- Weekly graph -->
+      <div style="padding:12px 14px 14px;border-top:1px solid #f0f0f0;margin-top:10px">
+        <div style="font-size:11px;font-weight:700;color:#dc2626;margin-bottom:6px">● Weekly Trend (last 16 weeks)</div>
+        <canvas id="hlWeekGraph" height="180" style="width:100%;display:block;cursor:pointer"></canvas>
+        <div id="hlWeekTooltip" class="hl-tooltip" style="display:none"></div>
+        <!-- Weekly click detail panel -->
+        <div id="hlWeekDetail" style="display:none;margin-top:12px;background:#fff5f5;border-radius:12px;border:1px solid #fde0e0;overflow:hidden">
+          <div style="background:#dc2626;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span id="hlWeekDetailTitle" style="font-size:13px;font-weight:800;color:#fff"></span>
+            <button onclick="document.getElementById('hlWeekDetail').style.display='none'"
+              style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:16px;cursor:pointer">✕</button>
+          </div>
+          <div id="hlWeekDetailBody" style="padding:12px 14px"></div>
         </div>
       </div>
     </div>
+
+    <!-- ═══ SECTION 4: Customer Purchase Day-wise ═══ -->
+    <div class="hl-new-section" id="custDaySection">
+      <div class="hl-new-head">
+        <div>
+          <div class="hl-new-title">📆 Customer Purchase — Day wise</div>
+          <div class="hl-new-sub">Daily orders count + revenue · Click any bar for details</div>
+        </div>
+        <button onclick="downloadSectionPDF('custDaySection','Customer Day-wise')"
+          style="background:#f0f0f0;color:#555;border:none;border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer">⬇️ PDF</button>
+      </div>
+      <div id="custDayMonthToggle" style="display:flex;gap:6px;padding:10px 14px;overflow-x:auto;scrollbar-width:none;flex-wrap:nowrap;border-bottom:1px solid #f0f0f0"></div>
+      <div style="padding:12px 14px 0">
+        <canvas id="hlCustDayGraph" height="200" style="width:100%;display:block;cursor:pointer"></canvas>
+        <div id="hlCustDayTooltip" class="hl-tooltip" style="display:none"></div>
+        <!-- Day click detail panel -->
+        <div id="hlCustDayDetail" style="display:none;margin-top:12px;background:#f7fff9;border-radius:12px;border:1px solid #d0f0dc;overflow:hidden">
+          <div style="background:#0f3460;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+            <span id="hlCustDayDetailTitle" style="font-size:13px;font-weight:800;color:#90e0ef"></span>
+            <button onclick="document.getElementById('hlCustDayDetail').style.display='none'"
+              style="background:none;border:none;color:rgba(255,255,255,0.5);font-size:16px;cursor:pointer">✕</button>
+          </div>
+          <div id="hlCustDayDetailBody" style="padding:12px 14px"></div>
+        </div>
+      </div>
+      <div style="padding:6px 14px 14px"></div>
+    </div>
   `;
 
-  // Store analysis data in global — avoids JSON in onclick attribute (breaks on quotes/special chars)
-  window._hlAiData = {
-    month:           m.label,
-    orders:          orders.length,
-    revenue:         revenue,
-    customers:       uniqueCustCount,
-    repeatCustomers: custList.filter(c => c.orderCount > 1).length,
-    topFish:         top5Fish.map(f => ({ name: f.key, qty: f.totalQty, kg: f.totalKg })),
-    topCustomers:    top5Cust.map(c => ({ name: c.name, orders: c.orderCount, spend: c.totalSpend, fish: [...c.fish].slice(0,4) })),
-    allFish:         fishList.slice(0, 15).map(f => ({ name: f.key, qty: f.totalQty })),
+  // Store graph data globally — including raw orders per month/week for detail panels
+  window._hlGraphData = {
+    monthLabels, monthRevData, monthOrdData,
+    weekLabels,  weekRevData,  weekOrdData,
+    currentMetric: 'rev',
+    allMonths,
+    // Raw orders per month for click detail
+    monthOrders: allMonths.map(mo => mo.orders),
+    // Raw orders per week for click detail
+    weekOrders: weeks.map(([,w]) => w.orders),
+    weekFullLabels: weeks.map(([k]) => k),
   };
+
+  // Draw all graphs after DOM ready
+  setTimeout(() => {
+    drawHlLineGraph('hlMonthGraph', monthLabels, monthRevData, '#16a34a', 'hlMonthTooltip', 'hlMonthDetail', 'hlMonthDetailTitle', 'hlMonthDetailBody');
+    drawHlLineGraph('hlWeekGraph',  weekLabels,  weekRevData,  '#dc2626', 'hlWeekTooltip',  'hlWeekDetail',  'hlWeekDetailTitle',  'hlWeekDetailBody');
+    buildCustDayToggle(allMonths);
+  }, 80);
 }
 
-async function runAiAnalysis() {
-  const el  = document.getElementById('hlAiContent');
-  const btn = document.getElementById('hlAiGenerateBtn');
-  const data = window._hlAiData;
-  if (!el || !data) return;
+// ── GRAPH: Generic line chart ─────────────────────────
+function drawHlLineGraph(canvasId, labels, data, color, tooltipId, detailId, detailTitleId, detailBodyId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
 
-  btn.disabled    = true;
-  btn.textContent = '⏳ Analyzing…';
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.clientWidth - 28;
+  const H   = 180;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
 
-  // Small delay for UX feel
-  await new Promise(r => setTimeout(r, 400));
+  const PAD = { top:20, right:16, bottom:36, left:56 };
+  const cW  = W - PAD.left - PAD.right;
+  const cH  = H - PAD.top  - PAD.bottom;
 
-  try {
-    // ── Rule 1: High Demand — top fish by qty ──
-    const topDemand = data.topFish.slice(0, 3);
-    const demandText = topDemand.length
-      ? topDemand.map((f,i) => `<span class="ai-badge demand">${f.name.split('–')[0].trim()} (${f.qty} qty)</span>`).join(' ')
-      : '—';
+  const maxVal = Math.max(...data, 1);
 
-    // ── Rule 2: Customer Favourites — fish ordered by repeat customers ──
-    const repeatFish = {};
-    (data.topCustomers || []).forEach(c => {
-      if (c.orders >= 2) {
-        (c.fish || []).forEach(f => {
-          const key = f.split('–')[0].trim();
-          repeatFish[key] = (repeatFish[key] || 0) + 1;
-        });
-      }
+  // Grid lines + Y labels
+  ctx.strokeStyle = '#f0f0f0';
+  ctx.lineWidth   = 1;
+  for (let i=0; i<=4; i++) {
+    const y = PAD.top + cH - (i/4)*cH;
+    ctx.beginPath(); ctx.moveTo(PAD.left, y); ctx.lineTo(PAD.left+cW, y); ctx.stroke();
+    const val = Math.round((i/4)*maxVal);
+    ctx.fillStyle = '#aaa';
+    ctx.font      = '9px -apple-system,sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(val >= 1000 ? '₹'+(val/1000).toFixed(1)+'k' : val, PAD.left-6, y+3);
+  }
+
+  if (!labels.length) return;
+  const stepX = cW / Math.max(labels.length-1, 1);
+
+  // X labels
+  ctx.fillStyle = '#888';
+  ctx.font      = '9px -apple-system,sans-serif';
+  ctx.textAlign = 'center';
+  labels.forEach((lbl, i) => {
+    const x = PAD.left + i * stepX;
+    ctx.fillText(lbl, x, H - PAD.bottom + 14);
+  });
+
+  // Compute points
+  const pts = data.map((v,i) => ({
+    x: PAD.left + i * stepX,
+    y: PAD.top + cH - (v / maxVal) * cH,
+    val: v, label: labels[i],
+  }));
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top+cH);
+  grad.addColorStop(0, color + '33');
+  grad.addColorStop(1, color + '00');
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, PAD.top+cH);
+  pts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(pts[pts.length-1].x, PAD.top+cH);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 2.5;
+  ctx.lineJoin    = 'round';
+  pts.forEach((p,i) => i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
+  ctx.stroke();
+
+  // Dots
+  pts.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+  });
+
+  // Store metadata on canvas element
+  canvas._hlPts      = pts;
+  canvas._hlColor    = color;
+  canvas._hlTooltipId = tooltipId;
+  canvas._hlPad      = PAD;
+
+  // Remove old listener if re-drawing, add fresh one
+  if (canvas._hlClickHandler) canvas.removeEventListener('click', canvas._hlClickHandler);
+
+  canvas._hlClickHandler = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx   = e.clientX - rect.left;
+    let nearest = 0, minDist = Infinity;
+    canvas._hlPts.forEach((p,i) => {
+      const dist = Math.abs(p.x - mx);
+      if (dist < minDist) { minDist = dist; nearest = i; }
     });
-    const lovedList = Object.entries(repeatFish)
-      .sort((a,b) => b[1]-a[1])
-      .slice(0, 3)
-      .map(([name]) => `<span class="ai-badge loved">${name}</span>`);
-    const lovedText = lovedList.length
-      ? lovedList.join(' ')
-      : '<span style="color:#888;font-size:12px">Not enough repeat customer data yet</span>';
+    const pt  = canvas._hlPts[nearest];
+    const tip = document.getElementById(canvas._hlTooltipId);
+    const d   = window._hlGraphData;
+    const isRevMode = !d || d.currentMetric !== 'ord';
 
-    // ── Rule 3: Restock / Low sales ──
-    const allFish    = data.allFish || [];
-    const avgQty     = allFish.reduce((a,f) => a+f.qty, 0) / (allFish.length || 1);
-    const lowStock   = allFish.filter(f => f.qty < avgQty * 0.5).slice(0, 4);
-    const restockText = lowStock.length
-      ? lowStock.map(f => `<span class="ai-badge restock">${f.name.split('–')[0].trim()} (${f.qty} qty)</span>`).join(' ')
-      : '<span style="color:#16a34a;font-size:12px">✅ All fish selling well this month</span>';
-
-    // ── Rule 4: Action Plan ──
-    const actions = [];
-    if (topDemand[0]) actions.push(`1. Stock more <strong>${topDemand[0].name.split('–')[0].trim()}</strong> — highest demand this month (${topDemand[0].qty} qty sold)`);
-    if (lovedList.length) actions.push(`2. Promote repeat-customer favourites via WhatsApp — they order again!`);
-    if (lowStock.length) actions.push(`3. Run offers on slow-moving fish: ${lowStock.map(f=>f.name.split('–')[0].trim()).join(', ')}`);
-    if (data.repeatCustomers > 0) actions.push(`4. ${data.repeatCustomers} repeat customer${data.repeatCustomers>1?'s':''} this month — send personalised offers to retain them`);
-    if (data.customers > 0) {
-      const newCust = data.customers - data.repeatCustomers;
-      if (newCust > 0) actions.push(`5. ${newCust} new customer${newCust>1?'s':''} acquired — follow up via WhatsApp to convert them to regulars`);
+    // Tooltip
+    if (tip) {
+      tip.style.display = 'block';
+      tip.innerHTML = `
+        <span style="color:${canvas._hlColor};font-weight:800">● ${pt.label}</span>
+        &nbsp;&nbsp;
+        <span style="font-size:14px;font-weight:900;color:#fff">
+          ${isRevMode ? fmtMoney(pt.val) : pt.val + ' orders'}
+        </span>`;
     }
 
-    el.innerHTML = `
-      <div class="ai-insight-section">
-        <div class="ai-insight-label">🔥 High Demand Fish</div>
-        <div class="ai-insight-text">Top selling fish this month based on quantity sold:<br><br>${demandText}</div>
-      </div>
-      <div class="ai-insight-section">
-        <div class="ai-insight-label">❤️ Customer Favourites</div>
-        <div class="ai-insight-text">Fish that repeat customers (2+ orders) love most:<br><br>${lovedText}</div>
-      </div>
-      <div class="ai-insight-section">
-        <div class="ai-insight-label">⚠️ Restock / Promote</div>
-        <div class="ai-insight-text">Fish selling below average — consider promotions or restocking:<br><br>${restockText}</div>
-      </div>
-      <div class="ai-insight-section">
-        <div class="ai-insight-label">🎯 Action Plan</div>
-        <div class="ai-insight-text" style="line-height:1.8">${actions.join('<br>') || '—'}</div>
-      </div>
-      <div style="text-align:right;padding-top:8px;font-size:10px;color:#ccc">
-        Rule-based analysis · ${new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}
-      </div>`;
+    // Detail panel
+    const detailEl = detailId ? document.getElementById(detailId) : null;
+    const titleEl  = detailTitleId ? document.getElementById(detailTitleId) : null;
+    const bodyEl   = detailBodyId  ? document.getElementById(detailBodyId)  : null;
 
-    btn.textContent = '🔄 Regenerate';
-    btn.disabled    = false;
+    if (detailEl && bodyEl) {
+      // Get orders for this point
+      const isMonth  = canvasId === 'hlMonthGraph';
+      const ordersForPoint = isMonth
+        ? (d?.monthOrders?.[nearest] || [])
+        : (d?.weekOrders?.[nearest]  || []);
 
-  } catch(err) {
-    el.innerHTML = `<div style="padding:14px;color:#dc2626;font-size:13px">⚠️ Analysis failed: ${err.message}</div>`;
-    btn.textContent = '✨ Generate';
-    btn.disabled    = false;
+      if (titleEl) titleEl.textContent = `${pt.label} — Details`;
+      detailEl.style.display = 'block';
+
+      if (!ordersForPoint.length) {
+        bodyEl.innerHTML = '<div style="color:#888;font-size:12px;padding:8px 0">No orders this period</div>';
+        return;
+      }
+
+      // Fish breakdown using Col G + Col J
+      const fishMap = {};
+      ordersForPoint.forEach(o => {
+        parseFishWithPrice(o.productRaw || o.productReport, o.priceRaw).forEach(item => {
+          if (!item.key) return;
+          if (!fishMap[item.key]) fishMap[item.key] = { qty: 0, revenue: 0 };
+          fishMap[item.key].qty     += item.qty;
+          fishMap[item.key].revenue += item.totalPrice;
+        });
+      });
+
+      const fishRows = Object.entries(fishMap)
+        .sort((a,b) => b[1].revenue - a[1].revenue)
+        .map(([name, d], i) => `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0">
+            <div style="width:20px;height:20px;border-radius:50%;background:${color}22;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:${color};flex-shrink:0">${i+1}</div>
+            <div style="flex:1;font-size:12px;font-weight:600;color:#1a1a2e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-size:12px;font-weight:800;color:#1a1a2e">${d.qty} qty</div>
+              <div style="font-size:10px;color:#16a34a;font-weight:700">${fmtMoney(Math.round(d.revenue))}</div>
+            </div>
+          </div>`).join('');
+
+      const totalRev = Object.values(fishMap).reduce((a,f)=>a+f.revenue,0);
+      const totalQty = Object.values(fishMap).reduce((a,f)=>a+f.qty,0);
+
+      bodyEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+          <div style="text-align:center;background:#fff;border-radius:10px;padding:10px;border:1px solid #e8e8e8">
+            <div style="font-size:18px;font-weight:900;color:#1a1a2e">${ordersForPoint.length}</div>
+            <div style="font-size:9px;color:#888;font-weight:700;text-transform:uppercase;margin-top:2px">Orders</div>
+          </div>
+          <div style="text-align:center;background:#fff;border-radius:10px;padding:10px;border:1px solid #e8e8e8">
+            <div style="font-size:15px;font-weight:900;color:#1a1a2e">${fmtMoney(Math.round(totalRev))}</div>
+            <div style="font-size:9px;color:#888;font-weight:700;text-transform:uppercase;margin-top:2px">Revenue</div>
+          </div>
+          <div style="text-align:center;background:#fff;border-radius:10px;padding:10px;border:1px solid #e8e8e8">
+            <div style="font-size:18px;font-weight:900;color:#1a1a2e">${totalQty}</div>
+            <div style="font-size:9px;color:#888;font-weight:700;text-transform:uppercase;margin-top:2px">Fish Qty</div>
+          </div>
+        </div>
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#888;margin-bottom:6px">Fish Breakdown</div>
+        ${fishRows || '<div style="color:#aaa;font-size:12px">No fish data for this period</div>'}`;
+    }
+    redrawDots(canvas, nearest);
+  };
+
+  canvas.addEventListener('click', canvas._hlClickHandler);
+}
+
+function redrawDots(canvas, selectedIdx) {
+  if (!canvas._hlPts) return;
+  const ctx   = canvas.getContext('2d');
+  const dpr   = window.devicePixelRatio || 1;
+  const color = canvas._hlColor;
+
+  canvas._hlPts.forEach((p, i) => {
+    ctx.beginPath();
+    if (i === selectedIdx) {
+      // Larger highlighted dot
+      ctx.arc(p.x, p.y, 7, 0, Math.PI*2);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+      ctx.fillStyle = '#fff'; ctx.fill();
+    } else {
+      ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    }
+  });
+}
+
+function showHlTooltip(tooltipId, label, value, color) {
+  const el = document.getElementById(tooltipId);
+  if (!el) return;
+  const d = window._hlGraphData;
+  const isRevMode = !d || d.currentMetric !== 'ord';
+  el.style.display = 'block';
+  el.innerHTML = `
+    <span style="color:${color};font-weight:800">● ${label}</span>
+    &nbsp;&nbsp;
+    <span style="font-size:14px;font-weight:900;color:#fff">
+      ${isRevMode ? fmtMoney(value) : value + ' orders'}
+    </span>`;
+}
+
+// ── FISH MATRIX HELPERS ──────────────────────────────
+function buildFishMatrixRows(allMonths, sortMode) {
+  const allFishKeys = [...new Set(
+    allMonths.flatMap(mo => buildFishRevenueReport(mo.orders).map(f=>f.key))
+  )];
+  const rows = allFishKeys.map(key => {
+    const monthData = allMonths.map(mo => {
+      const fish = buildFishRevenueReport(mo.orders);
+      return fish.find(f=>f.key===key) || { totalQty:0, totalRevenue:0 };
+    });
+    const totalQty = monthData.reduce((a,d)=>a+d.totalQty, 0);
+    const totalRev = monthData.reduce((a,d)=>a+d.totalRevenue, 0);
+    return { key, monthData, totalQty, totalRev };
+  });
+  if (sortMode==='qty_high') rows.sort((a,b)=>b.totalQty-a.totalQty);
+  else if (sortMode==='qty_low') rows.sort((a,b)=>a.totalQty-b.totalQty);
+  else rows.sort((a,b)=>b.totalRev-a.totalRev);
+
+  if (!rows.length) return `<tr><td colspan="20" style="text-align:center;color:#aaa;padding:16px">No data — make sure Col G & J have data</td></tr>`;
+
+  return rows.map(row => {
+    const cells = row.monthData.map(d =>
+      d.totalQty === 0
+        ? `<td style="text-align:center;color:#ddd">—</td>`
+        : `<td style="text-align:center;padding:8px 10px">
+            <div style="font-size:12px;font-weight:800;color:#1a1a2e">${d.totalQty} qty</div>
+            <div style="font-size:10px;color:#16a34a;font-weight:700;margin-top:1px">${fmtMoney(Math.round(d.totalRevenue))}</div>
+          </td>`
+    ).join('');
+    return `<tr>
+      <td style="position:sticky;left:0;background:#fff;z-index:1;font-size:11px;font-weight:600;padding:8px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${row.key}">${row.key}</td>
+      ${cells}
+      <td style="text-align:center;background:#f7f9ff;padding:8px 10px">
+        <div style="font-size:12px;font-weight:900;color:#1a1a2e">${row.totalQty} qty</div>
+        <div style="font-size:11px;color:#16a34a;font-weight:800;margin-top:1px">${fmtMoney(Math.round(row.totalRev))}</div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function applyFishMatrixFilter() {
+  const mode  = document.getElementById('fishMatrixFilter')?.value || 'revenue';
+  const tbody = document.getElementById('fishMatrixTbody');
+  const d     = window._hlGraphData;
+  if (!tbody || !d) return;
+  tbody.innerHTML = buildFishMatrixRows(d.allMonths, mode);
+}
+
+function toggleFishMatrix() {
+  const body = document.getElementById('fishMatrixBody');
+  const btn  = document.getElementById('fishMatrixToggle');
+  if (!body || !btn) return;
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  btn.textContent    = hidden ? '▲ Collapse' : '▼ Expand';
+}
+
+function downloadSectionPDF(sectionId, title) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head>
+    <title>TruSea — ${title}</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0;}
+      body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;font-size:12px;color:#1a1a2e;padding:20px;}
+      h2{font-size:16px;font-weight:800;margin-bottom:4px;}
+      .sub{font-size:11px;color:#888;margin-bottom:16px;}
+      table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+      th{font-size:10px;font-weight:700;text-transform:uppercase;color:#888;padding:7px 10px;background:#fafafa;border-bottom:2px solid #eee;text-align:right;}
+      th:first-child{text-align:left;}
+      td{padding:8px 10px;border-bottom:1px solid #f0f0f0;font-size:11px;text-align:right;}
+      td:first-child{text-align:left;font-weight:600;}
+      tr:last-child td{border-bottom:none;}
+      button,select,.hl-new-head button,.hl-new-head select{display:none!important;}
+      canvas{display:none!important;}
+      @page{margin:12mm;}
+    </style>
+  </head><body>
+    <h2>TruSea Fish — ${title}</h2>
+    <div class="sub">Generated: ${new Date().toLocaleString('en-IN')}</div>
+    ${section.innerHTML}
+  </body></html>`);
+  win.document.close();
+  setTimeout(()=>{ win.print(); win.close(); }, 600);
+}
+
+// ── TREND METRIC TOGGLE ───────────────────────────────
+function switchTrendMetric(metric) {
+  const d = window._hlGraphData;
+  if (!d) return;
+  d.currentMetric = metric;
+  document.getElementById('trendRevBtn')?.classList.toggle('active', metric==='rev');
+  document.getElementById('trendOrdBtn')?.classList.toggle('active', metric==='ord');
+  const mData = metric==='rev' ? d.monthRevData : d.monthOrdData;
+  const wData = metric==='rev' ? d.weekRevData  : d.weekOrdData;
+  drawHlLineGraph('hlMonthGraph', d.monthLabels, mData, '#16a34a', 'hlMonthTooltip', 'hlMonthDetail', 'hlMonthDetailTitle', 'hlMonthDetailBody');
+  drawHlLineGraph('hlWeekGraph',  d.weekLabels,  wData, '#dc2626', 'hlWeekTooltip',  'hlWeekDetail',  'hlWeekDetailTitle',  'hlWeekDetailBody');
+}
+
+// ── Customer Day-wise graph ───────────────────────────
+function buildCustDayToggle(allMonths) {
+  const toggleEl = document.getElementById('custDayMonthToggle');
+  if (!toggleEl) return;
+  toggleEl.innerHTML = allMonths.map((mo,i) =>
+    `<button class="hl-toggle-btn ${i===allMonths.length-1?'active':''}" id="cdtbtn_${i}"
+      onclick="showCustDayGraph(${i})" style="flex-shrink:0">${mo.shortLabel}</button>`
+  ).join('');
+  showCustDayGraph(allMonths.length-1);
+}
+
+function showCustDayGraph(idx) {
+  const d = window._hlGraphData;
+  if (!d) return;
+  document.querySelectorAll('[id^="cdtbtn_"]').forEach((el,i) => el.classList.toggle('active', i===idx));
+  const mo = d.allMonths[idx];
+  if (!mo) return;
+
+  const dayMap = {};
+  mo.orders.forEach(o => {
+    const dt = getOrderDate(o); if (!dt) return;
+    const day = dt.getDate();
+    if (!dayMap[day]) dayMap[day] = { orders: [], revenue: 0 };
+    dayMap[day].orders.push(o);
+    dayMap[day].revenue += o.total || 0;
+  });
+
+  const daysInMonth  = new Date(mo.year, mo.month+1, 0).getDate();
+  const dayLabels    = Array.from({length: daysInMonth}, (_,i) => String(i+1));
+  const ordData      = dayLabels.map(d => (dayMap[+d]?.orders.length || 0));
+  const revData      = dayLabels.map(d => (dayMap[+d]?.revenue || 0));
+
+  window._custDayMap     = dayMap;
+  window._custDayMoLabel = mo.shortLabel;
+  window._custDayMo      = mo;
+
+  drawCustDayDualLine('hlCustDayGraph', dayLabels, ordData, revData, 'hlCustDayTooltip');
+}
+
+function drawCustDayDualLine(canvasId, labels, ordData, revData, tooltipId) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.clientWidth - 28;
+  const H   = 200;
+  canvas.width  = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const PAD  = { top:32, right:64, bottom:36, left:50 };
+  const cW   = W - PAD.left - PAD.right;
+  const cH   = H - PAD.top - PAD.bottom;
+  const maxOrd = Math.max(...ordData, 1);
+  const maxRev = Math.max(...revData, 1);
+  const stepX  = cW / Math.max(labels.length - 1, 1);
+
+  // Grid
+  ctx.strokeStyle = '#f0f0f0'; ctx.lineWidth = 1;
+  for (let i=0; i<=4; i++) {
+    const y = PAD.top + cH - (i/4)*cH;
+    ctx.beginPath(); ctx.moveTo(PAD.left,y); ctx.lineTo(PAD.left+cW,y); ctx.stroke();
+    const ov = Math.round((i/4)*maxOrd);
+    ctx.fillStyle='#6366f1'; ctx.font='9px sans-serif'; ctx.textAlign='right';
+    ctx.fillText(ov, PAD.left-4, y+3);
+    const rv = Math.round((i/4)*maxRev);
+    ctx.fillStyle='#16a34a'; ctx.textAlign='left';
+    ctx.fillText(rv>=1000?'Rs.'+(rv/1000).toFixed(1)+'k':rv, PAD.left+cW+4, y+3);
   }
+
+  // X labels every 5 days
+  ctx.fillStyle='#888'; ctx.font='9px sans-serif'; ctx.textAlign='center';
+  labels.forEach((lbl,i) => {
+    if((i+1)%5===0 || i===0 || i===labels.length-1)
+      ctx.fillText(lbl, PAD.left+i*stepX, H-PAD.bottom+14);
+  });
+
+  // Legend
+  ctx.font='10px sans-serif'; ctx.textAlign='left';
+  ctx.fillStyle='#6366f1'; ctx.fillRect(PAD.left, 8, 12, 6);
+  ctx.fillStyle='#555'; ctx.fillText('Orders', PAD.left+16, 15);
+  ctx.fillStyle='#16a34a'; ctx.fillRect(PAD.left+70, 8, 12, 6);
+  ctx.fillStyle='#555'; ctx.fillText('Revenue', PAD.left+86, 15);
+
+  function drawLine(data, maxV, color) {
+    const pts = data.map((v,i)=>({x:PAD.left+i*stepX, y:PAD.top+cH-(v/maxV)*cH, v, lbl:labels[i]}));
+    const grad = ctx.createLinearGradient(0,PAD.top,0,PAD.top+cH);
+    grad.addColorStop(0, color+'22'); grad.addColorStop(1, color+'00');
+    ctx.beginPath(); ctx.moveTo(pts[0].x, PAD.top+cH);
+    pts.forEach(p=>ctx.lineTo(p.x,p.y));
+    ctx.lineTo(pts[pts.length-1].x, PAD.top+cH);
+    ctx.closePath(); ctx.fillStyle=grad; ctx.fill();
+    ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=2; ctx.lineJoin='round';
+    pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y)); ctx.stroke();
+    pts.forEach(p=>{ if(p.v===0) return;
+      ctx.beginPath(); ctx.arc(p.x,p.y,3.5,0,Math.PI*2);
+      ctx.fillStyle='#fff'; ctx.fill();
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.stroke(); });
+    return pts;
+  }
+
+  const ordPts = drawLine(ordData, maxOrd, '#6366f1');
+  const revPts = drawLine(revData, maxRev, '#16a34a');
+
+  if (canvas._hlClickHandler) canvas.removeEventListener('click', canvas._hlClickHandler);
+  canvas._hlClickHandler = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx   = e.clientX - rect.left;
+    let nearest=0, minDist=Infinity;
+    ordPts.forEach((p,i)=>{ const d=Math.abs(p.x-mx); if(d<minDist){minDist=d;nearest=i;} });
+
+    const day      = labels[nearest];
+    const dayData  = window._custDayMap?.[+day];
+    const tip      = document.getElementById(tooltipId);
+    const detailEl = document.getElementById('hlCustDayDetail');
+    const dtTitle  = document.getElementById('hlCustDayDetailTitle');
+    const dtBody   = document.getElementById('hlCustDayDetailBody');
+
+    if (tip) {
+      tip.style.display='block';
+      tip.innerHTML = `<span style="font-weight:800">${window._custDayMoLabel} · Day ${day}</span>
+        &nbsp;<span style="color:#6366f1;font-weight:700">${ordData[nearest]} order${ordData[nearest]!==1?'s':''}</span>
+        &nbsp;<span style="color:#16a34a;font-weight:700">${fmtMoney(revData[nearest])}</span>`;
+    }
+
+    if (detailEl && dtBody) {
+      detailEl.style.display='block';
+      if (dtTitle) dtTitle.textContent = `${window._custDayMoLabel} · Day ${day}`;
+      if (!dayData || !dayData.orders.length) {
+        dtBody.innerHTML='<div style="color:#aaa;font-size:12px;padding:8px 0">No orders on this day</div>';
+        return;
+      }
+      const fishMap={};
+      dayData.orders.forEach(o=>{
+        parseFishWithPrice(o.productRaw||o.productReport, o.priceRaw).forEach(item=>{
+          if(!item.key) return;
+          if(!fishMap[item.key]) fishMap[item.key]={qty:0,revenue:0};
+          fishMap[item.key].qty+=item.qty;
+          fishMap[item.key].revenue+=item.totalPrice;
+        });
+      });
+      const fishRows=Object.entries(fishMap)
+        .sort((a,b)=>b[1].revenue-a[1].revenue)
+        .map(([name,f],i)=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0f0f0">
+            <div style="font-size:11px;font-weight:600;color:#1a1a2e;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i+1}. ${name}</div>
+            <div style="font-size:11px;font-weight:800;color:#1a1a2e;white-space:nowrap">${f.qty} qty</div>
+            <div style="font-size:11px;font-weight:700;color:#16a34a;white-space:nowrap;min-width:60px;text-align:right">${fmtMoney(Math.round(f.revenue))}</div>
+          </div>`).join('');
+      dtBody.innerHTML=`
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div style="text-align:center;background:#f0f4ff;border-radius:10px;padding:10px">
+            <div style="font-size:20px;font-weight:900;color:#6366f1">${dayData.orders.length}</div>
+            <div style="font-size:9px;color:#888;font-weight:700;text-transform:uppercase;margin-top:2px">Orders</div>
+          </div>
+          <div style="text-align:center;background:#f0fff4;border-radius:10px;padding:10px">
+            <div style="font-size:15px;font-weight:900;color:#16a34a">${fmtMoney(Math.round(dayData.revenue))}</div>
+            <div style="font-size:9px;color:#888;font-weight:700;text-transform:uppercase;margin-top:2px">Revenue</div>
+          </div>
+        </div>
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:#888;margin-bottom:6px">Fish Sold This Day</div>
+        ${fishRows||'<div style="color:#aaa;font-size:12px">No fish data</div>'}`;
+    }
+  };
+  canvas.addEventListener('click', canvas._hlClickHandler);
 }
 
 // ── BUILD ARCHIVE MONTH CHIPS ────────────────────────
@@ -2512,19 +3101,6 @@ function renderMonthlyBreakdown(orders, start, end) {
 }
 
 // ── SECTION PDF DOWNLOAD ─────────────────────────────
-function downloadSectionPDF(sectionId, title) {
-  const el = document.getElementById(sectionId);
-  if (!el) { alert('Section not loaded yet.'); return; }
-  openPrintWindow(el.outerHTML, title);
-}
-
-// ── SECTION PDF DOWNLOAD ─────────────────────────────
-function downloadSectionPDF(sectionId, title) {
-  const el = document.getElementById(sectionId);
-  if (!el) { alert('Section not loaded yet.'); return; }
-  openPrintWindow(el.outerHTML, title);
-}
-
 // ── SET ARCHIVE TAB NAME ─────────────────────────────
 function setArchiveTabName() {
   // Tab stays as "Month Wise Sale Report" — static
